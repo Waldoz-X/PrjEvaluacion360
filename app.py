@@ -290,72 +290,84 @@ comp_options = [{'label': short_label(c), 'value': c} for c in comp_cols]
 
 # --- 3. NUEVO LAYOUT CON BOOTSTRAP ---
 app.layout = dbc.Container([
-    # Header
+    # Header - Responsivo
     dbc.Row([
         dbc.Col([
             html.Div([
-                html.H2('Dashboard 360° - Evaluación de Desempeño', className="text-dark fw-bold mb-2"),
-                html.P('Análisis integral de competencias y habilidades', className="text-secondary")
-            ], className="text-center", style={'backgroundColor': '#f8f9fa', 'padding': '30px', 'borderRadius': '10px', 'boxShadow': '0 2px 4px rgba(0,0,0,0.1)'})
-        ], className="mb-4", width=12)
+                html.H2('Dashboard 360° - Evaluación de Desempeño',
+                       className="text-dark fw-bold mb-2",
+                       style={'fontSize': 'clamp(1.25rem, 4vw, 2rem)'}),  # Tamaño de fuente adaptable
+                html.P('Análisis integral de competencias y habilidades',
+                      className="text-secondary",
+                      style={'fontSize': 'clamp(0.875rem, 2vw, 1rem)'})
+            ], className="text-center", style={
+                'backgroundColor': '#f8f9fa',
+                'padding': 'clamp(15px, 4vw, 30px)',  # Padding adaptable
+                'borderRadius': '10px',
+                'boxShadow': '0 2px 4px rgba(0,0,0,0.1)'
+            })
+        ], xs=12, className="mb-3 mb-md-4")  # Margen adaptable
     ]),
 
-    # Panel de Control
+    # Panel de Control - Adaptable
     dbc.Row([
+        # Sidebar - Full width en móvil, lateral en desktop
         dbc.Col([
             dbc.Card([
                 dbc.CardBody([
-                    html.H5("Configuración", className="card-title text-primary mb-3"),
+                    html.H5("Configuración", className="card-title text-primary mb-3",
+                           style={'fontSize': 'clamp(1rem, 3vw, 1.25rem)'}),
 
                     # Selector de evaluado
-                    html.Label('Evaluado:', className="fw-bold mb-2"),
+                    html.Label('Evaluado:', className="fw-bold mb-2 small"),
                     dcc.Dropdown(
                         id='evaluado-dropdown',
                         options=evaluados_options,
                         value=evaluados_options[0]['value'] if evaluados_options else None,
-                        className="mb-3"
+                        className="mb-3",
+                        style={'fontSize': 'clamp(0.75rem, 2vw, 1rem)'}
                     ),
 
                     html.Hr(),
 
-                    # Ponderaciones compactas
-                    html.Label('Ponderaciones (%):', className="fw-bold mb-2"),
+                    # Ponderaciones compactas - Grid responsivo
+                    html.Label('Ponderaciones (%):', className="fw-bold mb-2 small"),
                     html.Small('Se normalizan automáticamente', className="text-muted d-block mb-2"),
 
                     dbc.Row([
                         dbc.Col([
-                            dbc.Label('Auto', className="small"),
+                            dbc.Label('Auto', className="small", style={'fontSize': 'clamp(0.7rem, 1.5vw, 0.875rem)'}),
                             dbc.Input(id='w-auto', type='number', value=5, min=0, max=100, step=1, size="sm")
-                        ], width=3),
+                        ], xs=6, sm=3, className="mb-2 mb-sm-0"),  # 2 columnas en móvil, 4 en tablet+
                         dbc.Col([
-                            dbc.Label('Jefe', className="small"),
+                            dbc.Label('Jefe', className="small", style={'fontSize': 'clamp(0.7rem, 1.5vw, 0.875rem)'}),
                             dbc.Input(id='w-jefe', type='number', value=18, min=0, max=100, step=1, size="sm")
-                        ], width=3),
+                        ], xs=6, sm=3, className="mb-2 mb-sm-0"),
                         dbc.Col([
-                            dbc.Label('Colegas', className="small"),
+                            dbc.Label('Colegas', className="small", style={'fontSize': 'clamp(0.7rem, 1.5vw, 0.875rem)'}),
                             dbc.Input(id='w-colegas', type='number', value=30, min=0, max=100, step=1, size="sm")
-                        ], width=3),
+                        ], xs=6, sm=3),
                         dbc.Col([
-                            dbc.Label('Subord.', className="small"),
+                            dbc.Label('Subord.', className="small", style={'fontSize': 'clamp(0.7rem, 1.5vw, 0.875rem)'}),
                             dbc.Input(id='w-sub', type='number', value=47, min=0, max=100, step=1, size="sm")
-                        ], width=3)
+                        ], xs=6, sm=3)
                     ])
-                ])
+                ], className="p-3")  # Padding fijo reducido para móviles
             ], className="shadow-sm mb-3"),
 
             # Tarjeta de calificación final
             dbc.Card([
-                dbc.CardBody(html.Div(id='resultado-global'))
+                dbc.CardBody(html.Div(id='resultado-global'), className="p-3")
             ], className="shadow-sm")
-        ], width=12, lg=3),
+        ], xs=12, sm=12, md=12, lg=3, xl=3, className="mb-3 mb-lg-0"),  # Full width en móvil/tablet, sidebar en desktop
 
-        # Área de visualización
+        # Área de visualización - Adaptable
         dbc.Col([
             # Grid de gráficas de pastel por categoría
             html.Div(id='graficas-categorias')
-        ], width=12, lg=9)
+        ], xs=12, sm=12, md=12, lg=9, xl=9)  # Full width en móvil/tablet, 9 cols en desktop
     ])
-], fluid=True, className="bg-light p-3", style={'minHeight': '100vh'})
+], fluid=True, className="bg-light p-2 p-sm-3 p-md-4", style={'minHeight': '100vh'})
 
 
 # --- Mapeo de Relaciones ---
@@ -508,10 +520,10 @@ def actualizar_panel(evaluado, w_auto, w_jefe, w_colegas, w_sub):
         ),
         showlegend=True,
         legend=dict(orientation="h", yanchor="bottom", y=-0.2, xanchor="center", x=0.5),
-        height=450,
-        margin=dict(t=40, b=60, l=40, r=40),
+        height=400,  # Altura reducida para móviles
+        margin=dict(t=20, b=80, l=20, r=20),  # Márgenes reducidos
         paper_bgcolor='rgba(0,0,0,0)',
-        font=dict(size=11)
+        font=dict(size=10)  # Fuente más pequeña para móviles
     )
 
     # --- DETERMINAR APTITUD PARA EL PUESTO ---
