@@ -1054,14 +1054,14 @@ def actualizar_panel(evaluado, w_auto, w_jefe, w_colegas, w_sub):
 
         fig_pastel.update_layout(
             showlegend=False,
-            height=220,
-            margin=dict(t=10, b=10, l=10, r=10),
+            height=180,
+            margin=dict(t=5, b=5, l=5, r=5),
             paper_bgcolor='rgba(0,0,0,0)',
             annotations=[
                 dict(
-                    text=f'<b style="font-size:24px">{promedio_cat:.2f}</b><br><span style="font-size:12px; color:#888">de 5.0</span>',
+                    text=f'<b style="font-size:20px">{promedio_cat:.2f}</b><br><span style="font-size:11px; color:#888">de 5.0</span>',
                     x=0.5, y=0.5,
-                    font=dict(size=16, color='#2c3e50'),
+                    font=dict(size=14, color='#2c3e50'),
                     showarrow=False
                 )
             ]
@@ -1071,10 +1071,10 @@ def actualizar_panel(evaluado, w_auto, w_jefe, w_colegas, w_sub):
             dbc.Card([
                 dbc.CardBody([
                     html.Div([
-                        html.I(className="fas fa-star", style={'color': colores_categorias.get(categoria, '#667eea'), 'marginRight': '8px'}),
+                        html.I(className="fas fa-star", style={'color': colores_categorias.get(categoria, '#667eea'), 'marginRight': '8px', 'fontSize': '16px'}),
                         html.Span(categoria, className="fw-bold")
-                    ], className="text-center mb-2", style={'fontSize': '14px', 'color': '#2c3e50'}),
-                    dcc.Graph(figure=fig_pastel, config={'displayModeBar': False}),
+                    ], className="text-center mb-2", style={'fontSize': '13px', 'color': '#2c3e50', 'minHeight': '20px'}),
+                    dcc.Graph(figure=fig_pastel, config={'displayModeBar': False}, style={'height': '180px'}),
                     html.Div([
                         html.Span(
                             f'{len(comps_cat)} competencia{"s" if len(comps_cat) > 1 else ""}',
@@ -1082,17 +1082,19 @@ def actualizar_panel(evaluado, w_auto, w_jefe, w_colegas, w_sub):
                             style={
                                 'backgroundColor': colores_categorias.get(categoria, '#667eea'),
                                 'color': 'white',
-                                'fontSize': '11px'
+                                'fontSize': '10px'
                             }
                         )
-                    ], className="text-center mt-2")
-                ], className="p-3")
-            ], className="shadow-sm h-100 border-0",
+                    ], className="text-center mt-1")
+                ], className="p-2", style={'height': '260px', 'display': 'flex', 'flexDirection': 'column', 'justifyContent': 'space-between'})
+            ], className="shadow-sm border-0",
                style={
                    'borderTop': f'4px solid {colores_categorias.get(categoria, "#667eea")}',
                    'borderRadius': '8px',
                    'transition': 'transform 0.2s',
-                   'background': 'linear-gradient(135deg, #ffffff 0%, #f8f9fa 100%)'
+                   'background': 'linear-gradient(135deg, #ffffff 0%, #f8f9fa 100%)',
+                   'height': '280px',
+                   'overflow': 'hidden'
                })
         ], width=6, lg=4, xl=3, className="mb-3")
 
