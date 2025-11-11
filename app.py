@@ -938,9 +938,9 @@ def actualizar_panel(evaluado, w_auto, w_jefe, w_colegas, w_sub):
                     dbc.CardBody([
                         html.H5("Análisis de Madurez por Habilidades", className="card-title text-primary mb-1"),
                         html.Small("Comparación con benchmarks y promedio empresarial", className="text-muted d-block mb-3"),
-                        dcc.Graph(figure=fig_radar_avanzado, config={'displayModeBar': False})
+                        dcc.Graph(figure=fig_radar_avanzado, config={'displayModeBar': False}, style={'height': '500px'})
                     ])
-                ], className="shadow-sm h-100")
+                ], className="shadow-sm")  # Removido h-100
             ], width=12, lg=7, className="mb-3"),
 
             dbc.Col([
@@ -954,9 +954,9 @@ def actualizar_panel(evaluado, w_auto, w_jefe, w_colegas, w_sub):
                 dbc.Card([
                     dbc.CardBody([
                         html.H5("Perfil de Competencias", className="card-title text-primary mb-3"),
-                        dcc.Graph(figure=fig_radar_general, config={'displayModeBar': False})
+                        dcc.Graph(figure=fig_radar_general, config={'displayModeBar': False}, style={'height': '400px'})
                     ])
-                ], className="shadow-sm h-100")
+                ], className="shadow-sm")  # Removido h-100
             ], width=12, lg=6, className="mb-3"),
 
             dbc.Col([
@@ -971,7 +971,7 @@ def actualizar_panel(evaluado, w_auto, w_jefe, w_colegas, w_sub):
             dbc.Col([
                 dbc.Card([
                     dbc.CardBody([
-                        dcc.Graph(figure=fig_comparacion, config={'displayModeBar': False})
+                        dcc.Graph(figure=fig_comparacion, config={'displayModeBar': False}, style={'height': '400px'})
                     ])
                 ], className="shadow-sm")
             ], width=12, className="mb-4")
