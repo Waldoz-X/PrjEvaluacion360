@@ -431,6 +431,19 @@ def actualizar_panel(evaluado, w_auto, w_jefe, w_colegas, w_sub):
     # Calcular promedios por grupo
     grupos = df_eval.groupby('grupo_ponderacion')[comp_cols].mean()
 
+    # --- CONTEO DE EVALUADORES ---
+    conteo_evaluadores = df_eval['grupo_ponderacion'].value_counts().to_dict()
+    total_evaluadores = len(df_eval)
+
+    # Colores para cada tipo de evaluador
+    colores_evaluadores = {
+        'Autoevaluación': '#17a2b8',
+        'Jefe Inmediato': '#dc3545',
+        'Colegas': '#ffc107',
+        'Subordinados': '#28a745',
+        'Otros': '#6c757d'
+    }
+
     # Calcular puntaje final por competencia
     final_por_comp = pd.Series(0.0, index=comp_cols)
     for grupo, peso in weights_norm.items():
@@ -439,8 +452,9 @@ def actualizar_panel(evaluado, w_auto, w_jefe, w_colegas, w_sub):
 
     calificacion_final = final_por_comp.mean()
 
-    # --- RESUMEN ---
+    # --- RESUMEN CON TARJETA DE EVALUADORES ---
     resumen = html.Div([
+        # Calificación Final
         html.H6("Calificación Final", className="text-muted mb-1"),
         html.H1(f'{calificacion_final:.2f}', className='text-primary fw-bold mb-1', style={'fontSize': '2.5rem'}),
         html.Small('de 5.0', className="text-muted d-block mb-2"),
@@ -448,7 +462,40 @@ def actualizar_panel(evaluado, w_auto, w_jefe, w_colegas, w_sub):
         html.Div([
             html.Span(f"{k}: {v:.0%}", className="badge bg-secondary me-1 mb-1")
             for k, v in weights_norm.items() if v > 0
-        ], className="d-flex flex-wrap justify-content-center")
+        ], className="d-flex flex-wrap justify-content-center"),
+
+        # Separador
+        html.Hr(className="my-3"),
+
+        # Tarjeta de Evaluadores
+        html.Div([
+            html.H6("Evaluadores", className="text-muted mb-3 text-center"),
+            html.Div([
+                html.Div([
+                    html.I(className="fas fa-users", style={'fontSize': '24px', 'color': '#667eea'}),
+                    html.H3(f'{total_evaluadores}', className='text-primary fw-bold mb-0 mt-2'),
+                    html.Small('Total de evaluaciones', className='text-muted d-block')
+                ], className="text-center mb-3 p-2", style={'backgroundColor': '#f8f9fa', 'borderRadius': '8px'}),
+
+                # Desglose por tipo
+                html.Div([
+                    html.Div([
+                        html.Div([
+                            html.Span(
+                                '●',
+                                style={'color': colores_evaluadores.get(tipo, '#6c757d'), 'fontSize': '20px', 'marginRight': '8px'}
+                            ),
+                            html.Span(tipo, className='small fw-bold', style={'fontSize': '0.8rem'}),
+                        ], style={'display': 'flex', 'alignItems': 'center', 'marginBottom': '4px'}),
+                        html.Div([
+                            html.Strong(str(cantidad), className='text-primary', style={'fontSize': '1.1rem'}),
+                            html.Small(f" evaluacion{'es' if cantidad != 1 else ''}", className='text-muted ms-1')
+                        ])
+                    ], className='mb-2 pb-2', style={'borderBottom': '1px solid #e9ecef'} if idx < len(conteo_evaluadores) - 1 else {})
+                    for idx, (tipo, cantidad) in enumerate(sorted(conteo_evaluadores.items(), key=lambda x: x[1], reverse=True))
+                ])
+            ])
+        ])
     ], className="text-center")
 
     # --- CREAR GRÁFICAS DE PASTEL POR CATEGORÍA ---
@@ -556,7 +603,7 @@ def actualizar_panel(evaluado, w_auto, w_jefe, w_colegas, w_sub):
 
     # --- CALCULAR KPIs ADICIONALES ---
     # Consistencia (desviación estándar entre categorías - menor es mejor)
-    consistencia = 5 - (final_por_comp[comps_cat].std() * 2)  # Normalizado a escala 0-5
+    consistencia = 5 - (final_por_comp.std() * 2)  # Normalizado a escala 0-5
     consistencia = max(0, min(5, consistencia))
 
     # Brecha de mejora (distancia al objetivo ideal 5.0)
@@ -840,7 +887,7 @@ def actualizar_panel(evaluado, w_auto, w_jefe, w_colegas, w_sub):
         dbc.CardBody([
             html.H5("Matriz de Potencial vs. Desempeño", className="card-title text-primary mb-1"),
             html.Small("Posicionamiento estratégico del talento", className="text-muted d-block mb-3"),
-            dcc.Graph(figure=fig_matriz, config={'displayModeBar': False}),
+            dcc.Graph(figure=fig_matriz, config={'displayModeBar': False}, style={'height': '450px'}),
             html.Div([
                 html.Div([
                     html.H6(cuadrante, className="fw-bold mb-1", style={'color': color_cuadrante}),
@@ -849,7 +896,7 @@ def actualizar_panel(evaluado, w_auto, w_jefe, w_colegas, w_sub):
                 ], className="p-3 rounded", style={'backgroundColor': '#f8f9fa'})
             ])
         ])
-    ], className="shadow-sm h-100")
+    ], className="shadow-sm")  # Removido h-100 y agregado altura fija al gráfico
 
     # --- IDENTIFICAR FORTALEZAS Y ÁREAS DE MEJORA ---
     # Top 3 fortalezas (categorías con mejor puntaje)
