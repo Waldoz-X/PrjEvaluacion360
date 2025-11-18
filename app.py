@@ -15,7 +15,7 @@ import dash_bootstrap_components as dbc  # <-- 1. IMPORTAR BOOTSTRAP
 # Configuración por defecto
 DEFAULT_SHEET_ID = "16wSqQKJiYZBbmgBNg4Wzi1mvCx5laEncsL5npXzH1Po"
 SHEET_NAME_TEXT = "Respuestas de formulario 1"
-SHEET_NAME_NUM = "Base de Datos Limpia"
+SHEET_NAME_NUM = "Respuestas de formulario 1"
 
 SHEET_ID = os.environ.get('SHEET_ID', DEFAULT_SHEET_ID)
 SHEET_GID = os.environ.get('SHEET_GID')
@@ -96,8 +96,10 @@ def convertir_likert(df):
                 if pd.isna(v):
                     return v
                 s = str(v).strip()
-                # intentar mapear texto Likert (case-insensitive)
-                mapped = LIKERT_MAP.get(s.lower())
+                # normalizar texto (quitar tildes y pasar a minúsculas)
+                s_norm = ''.join(c for c in unicodedata.normalize('NFKD', s) if not unicodedata.combining(c)).lower()
+                # intentar mapear texto Likert
+                mapped = LIKERT_MAP.get(s_norm)
                 if mapped is not None:
                     return mapped
                 # intentar convertir a número si es posible
@@ -574,32 +576,48 @@ def actualizar_panel(evaluado, w_auto, w_jefe, w_colegas, w_sub):
     )
 
     # --- DETERMINAR APTITUD PARA EL PUESTO ---
-    # Criterios:
-    # - Apto: Calificación >= 4.0 y ninguna categoría < 3.0
-    # - En Desarrollo: Calificación >= 3.0 y < 4.0
-    # - No Apto: Calificación < 3.0 o alguna categoría crítica < 2.5
+    # Criterios mejorados con enfoque constructivo:
+    # - Sobresaliente: Calificación >= 4.5
+    # - Alto Desempeño: Calificación >= 4.0 y ninguna categoría < 3.0
+    # - Cumple Expectativas: Calificación >= 3.5 y ninguna categoría < 2.5
+    # - En Desarrollo: Calificación >= 2.5 o algunas categorías < 3.5
+    # - Requiere Apoyo: Calificación < 2.5
 
     categorias_bajas = [cat for cat, val in promedios_categorias.items() if val < 3.0]
     categorias_criticas = [cat for cat, val in promedios_categorias.items() if val < 2.5]
 
-    if calificacion_final >= 4.0 and not categorias_bajas:
-        estado_aptitud = "APTO"
+    if calificacion_final >= 4.5:
+        estado_aptitud = "SOBRESALIENTE"
+        color_aptitud = "#28a745"  # Verde oscuro
+        icono_aptitud = "⭐"
+        mensaje_aptitud = "Desempeño excepcional en todas las competencias"
+        recomendacion_rh = "Talento clave - Considerar para roles de liderazgo estratégico y mentoría"
+    elif calificacion_final >= 4.0 and not categorias_bajas:
+        estado_aptitud = "ALTO DESEMPEÑO"
         color_aptitud = "#28a745"  # Verde
         icono_aptitud = "✓"
-        mensaje_aptitud = "Cumple con todos los estándares del puesto"
-        recomendacion_rh = "Considerar para promoción o proyectos de liderazgo"
-    elif calificacion_final >= 3.0 and not categorias_criticas:
+        mensaje_aptitud = "Cumple ampliamente con los estándares del puesto"
+        recomendacion_rh = "Excelente desempeño - Considerar para promoción o proyectos de alto impacto"
+    elif calificacion_final >= 3.5 and not categorias_criticas:
+        estado_aptitud = "CUMPLE EXPECTATIVAS"
+        color_aptitud = "#17a2b8"  # Azul
+        icono_aptitud = "✓"
+        mensaje_aptitud = "Desempeño satisfactorio acorde al puesto"
+        recomendacion_rh = "Mantener nivel actual - Oportunidades de desarrollo en áreas específicas"
+    elif calificacion_final >= 2.5:
         estado_aptitud = "EN DESARROLLO"
         color_aptitud = "#ffc107"  # Amarillo
-        icono_aptitud = "⚠"
-        mensaje_aptitud = f"Requiere mejora en: {', '.join(categorias_bajas) if categorias_bajas else 'algunas áreas'}"
-        recomendacion_rh = "Implementar plan de desarrollo con seguimiento trimestral"
+        icono_aptitud = "⚡"
+        areas_mejora = ', '.join(categorias_bajas[:2]) if categorias_bajas else 'algunas competencias'
+        mensaje_aptitud = f"Oportunidades de crecimiento en: {areas_mejora}"
+        recomendacion_rh = "Plan de desarrollo personalizado - Capacitación y seguimiento trimestral"
     else:
-        estado_aptitud = "NO APTO"
-        color_aptitud = "#dc3545"  # Rojo
-        icono_aptitud = "✗"
-        mensaje_aptitud = f"Deficiencias críticas en: {', '.join(categorias_criticas) if categorias_criticas else 'múltiples áreas'}"
-        recomendacion_rh = "Requiere plan de mejora inmediato o considerar reubicación"
+        estado_aptitud = "REQUIERE APOYO"
+        color_aptitud = "#ff6b6b"  # Rojo suave
+        icono_aptitud = "📋"
+        areas_prioritarias = ', '.join(categorias_criticas[:2]) if categorias_criticas else 'múltiples competencias'
+        mensaje_aptitud = f"Requiere apoyo inmediato en: {areas_prioritarias}"
+        recomendacion_rh = "Plan de acción intensivo - Coaching, mentoría y revisión mensual de avances"
 
     # --- CALCULAR KPIs ADICIONALES ---
     # Consistencia (desviación estándar entre categorías - menor es mejor)
@@ -978,6 +996,25 @@ def actualizar_panel(evaluado, w_auto, w_jefe, w_colegas, w_sub):
         # Fila 0: KPIs
         tarjetas_kpis,
 
+        # Explicación de KPIs
+        dbc.Row([
+            dbc.Col([
+                dbc.Alert([
+                    html.I(className="fas fa-info-circle me-2"),
+                    html.Strong("Fuente de datos: "),
+                    f"Basado en {total_evaluadores} evaluaciones recibidas. ",
+                    html.Strong("Nivel de Cumplimiento: "),
+                    "Porcentaje de logro sobre el estándar mínimo esperado (3.5/5.0). ",
+                    html.Strong("Consistencia: "),
+                    "Uniformidad en el desempeño entre categorías (5.0 = muy uniforme). ",
+                    html.Strong("Percentil: "),
+                    f"Posición relativa respecto a {len(promedios_empresa)} colaboradores evaluados. ",
+                    html.Strong("Brecha: "),
+                    "Distancia al objetivo ideal (5.0/5.0)."
+                ], color="info", className="small mb-4", style={'fontSize': '0.85rem'})
+            ], width=12)
+        ]),
+
         # Primera fila: Radar Avanzado + Matriz de Potencial
         dbc.Row([
             dbc.Col([
@@ -985,13 +1022,36 @@ def actualizar_panel(evaluado, w_auto, w_jefe, w_colegas, w_sub):
                     dbc.CardBody([
                         html.H5("Análisis de Madurez por Habilidades", className="card-title text-primary mb-1"),
                         html.Small("Comparación con benchmarks y promedio empresarial", className="text-muted d-block mb-3"),
-                        dcc.Graph(figure=fig_radar_avanzado, config={'displayModeBar': False}, style={'height': '500px'})
+                        dcc.Graph(figure=fig_radar_avanzado, config={'displayModeBar': False}, style={'height': '500px'}),
+                        html.Hr(className="my-2"),
+                        html.Div([
+                            html.I(className="fas fa-chart-area me-2", style={'color': '#667eea'}),
+                            html.Small([
+                                html.Strong("¿Qué muestra? "),
+                                f"Compara el desempeño del evaluado en {len(promedios_categorias)} categorías contra 3 referencias: ",
+                                html.Span("(1) Nivel Sobresaliente (4.5+)", className="text-success fw-bold"),
+                                ", (2) Nivel Aceptable (3.5+), y ",
+                                html.Span(f"(3) Promedio de la empresa ({promedio_empresa:.2f})", className="text-secondary fw-bold"),
+                                ". Los datos provienen de la ponderación de autoevaluación, evaluación de jefe, colegas y subordinados según los porcentajes configurados."
+                            ], className="text-muted", style={'fontSize': '0.8rem'})
+                        ], className="px-2")
                     ])
-                ], className="shadow-sm")  # Removido h-100
+                ], className="shadow-sm")
             ], width=12, lg=7, className="mb-3"),
 
             dbc.Col([
-                tarjeta_matriz
+                tarjeta_matriz,
+                html.Div([
+                    html.I(className="fas fa-compass me-2", style={'color': '#f093fb'}),
+                    html.Small([
+                        html.Strong("¿Qué muestra? "),
+                        "Matriz de talento 9-box simplificada. ",
+                        html.Strong("Eje X (Potencial): "),
+                        f"Promedio de {len([c for c in categorias_potencial if c in promedios_categorias])} categorías estratégicas (Liderazgo, Innovación, Toma de Decisiones). ",
+                        html.Strong("Eje Y (Desempeño): "),
+                        "Calificación final ponderada. Los puntos grises representan otros colaboradores para contexto comparativo."
+                    ], className="text-muted", style={'fontSize': '0.75rem'})
+                ], className="mt-2 p-2 rounded", style={'backgroundColor': '#f8f9fa'})
             ], width=12, lg=5, className="mb-3")
         ]),
 
@@ -1001,15 +1061,34 @@ def actualizar_panel(evaluado, w_auto, w_jefe, w_colegas, w_sub):
                 dbc.Card([
                     dbc.CardBody([
                         html.H5("Perfil de Competencias", className="card-title text-primary mb-3"),
-                        dcc.Graph(figure=fig_radar_general, config={'displayModeBar': False}, style={'height': '400px'})
+                        dcc.Graph(figure=fig_radar_general, config={'displayModeBar': False}, style={'height': '400px'}),
+                        html.Hr(className="my-2"),
+                        html.Div([
+                            html.I(className="fas fa-radar me-2", style={'color': '#36d1dc'}),
+                            html.Small([
+                                html.Strong("¿Qué muestra? "),
+                                f"Vista simplificada del perfil de competencias en {len(promedios_categorias)} categorías. ",
+                                "La línea azul representa el desempeño actual del evaluado y la línea roja punteada marca el estándar mínimo esperado (3.5/5.0). ",
+                                "Áreas fuera del estándar requieren atención prioritaria."
+                            ], className="text-muted", style={'fontSize': '0.8rem'})
+                        ], className="px-2")
                     ])
-                ], className="shadow-sm")  # Removido h-100
+                ], className="shadow-sm")
             ], width=12, lg=6, className="mb-3"),
 
             dbc.Col([
                 tarjeta_aptitud,
                 html.Div(style={'height': '15px'}),
-                tabla_analisis
+                tabla_analisis,
+                html.Div([
+                    html.I(className="fas fa-balance-scale-right me-2", style={'color': '#ffc107'}),
+                    html.Small([
+                        html.Strong("Aptitud: "),
+                        "Determinada por calificación final y número de categorías bajo el estándar. ",
+                        html.Strong("Fortalezas/Mejoras: "),
+                        "Top 3 categorías con mejor y menor desempeño basado en la ponderación de todas las evaluaciones recibidas."
+                    ], className="text-muted", style={'fontSize': '0.75rem'})
+                ], className="mt-2 p-2 rounded", style={'backgroundColor': '#f8f9fa'})
             ], width=12, lg=6, className="mb-3")
         ]),
 
@@ -1018,7 +1097,18 @@ def actualizar_panel(evaluado, w_auto, w_jefe, w_colegas, w_sub):
             dbc.Col([
                 dbc.Card([
                     dbc.CardBody([
-                        dcc.Graph(figure=fig_comparacion, config={'displayModeBar': False}, style={'height': '400px'})
+                        dcc.Graph(figure=fig_comparacion, config={'displayModeBar': False}, style={'height': '400px'}),
+                        html.Hr(className="my-2"),
+                        html.Div([
+                            html.I(className="fas fa-users-between-lines me-2", style={'color': '#28a745'}),
+                            html.Small([
+                                html.Strong("¿Qué muestra? "),
+                                "Comparación de cómo cada tipo de evaluador (autoevaluación, jefe, colegas, subordinados) califica al colaborador en cada categoría. ",
+                                "Permite identificar discrepancias de percepción entre grupos. ",
+                                html.Strong("Nota: "),
+                                "Solo se muestran grupos con evaluaciones disponibles. Las diferencias significativas pueden indicar áreas de desarrollo en comunicación o percepción del desempeño."
+                            ], className="text-muted", style={'fontSize': '0.8rem'})
+                        ], className="px-2 pb-2")
                     ])
                 ], className="shadow-sm")
             ], width=12, className="mb-4")
@@ -1027,7 +1117,17 @@ def actualizar_panel(evaluado, w_auto, w_jefe, w_colegas, w_sub):
         # Cuarta fila: Grid de gráficas de dona por categoría
         dbc.Row([
             dbc.Col([
-                html.H5("Detalle por Categoría", className="text-primary mb-3")
+                html.H5("Detalle por Categoría", className="text-primary mb-2"),
+                html.P([
+                    html.I(className="fas fa-chart-pie me-2", style={'color': '#667eea'}),
+                    html.Small([
+                        "Cada dona representa el porcentaje de logro en una categoría específica. ",
+                        "El número central es la calificación ponderada final (escala 1-5). ",
+                        "El badge inferior indica cuántas competencias individuales componen cada categoría.",
+                        html.Strong(" Datos: ", className="ms-2"),
+                        f"Resultado de promediar {len(comp_cols)} competencias evaluadas, agrupadas en {len(categorias_comp)} categorías según palabras clave."
+                    ], className="text-muted", style={'fontSize': '0.85rem'})
+                ], className="mb-3")
             ], width=12)
         ])
     ])
