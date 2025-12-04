@@ -8,6 +8,8 @@ import plotly.graph_objs as go
 import urllib.parse
 import unicodedata
 import dash_bootstrap_components as dbc  # <-- 1. IMPORTAR BOOTSTRAP
+from dash.exceptions import PreventUpdate
+import utils_reporte  # Módulo de reportes
 
 # --- Configuración y Carga de Datos ---
 # (Todo tu código de lógica de datos va aquí, no necesita cambios)
@@ -360,6 +362,32 @@ app.layout = dbc.Container([
             # Tarjeta de calificación final
             dbc.Card([
                 dbc.CardBody(html.Div(id='resultado-global'), className="p-3")
+            ], className="shadow-sm mb-3"),
+
+            # Botones de Descarga
+            dbc.Card([
+                dbc.CardBody([
+                    html.H6("Exportar Reporte", className="card-title text-muted mb-3"),
+                    dcc.Loading(
+                        id="loading-download",
+                        type="default",
+                        children=[
+                            dbc.Row([
+                                dbc.Col(
+                                    dbc.Button([html.I(className="fas fa-file-pdf me-2"), "PDF"], 
+                                             id="btn-pdf", color="danger", outline=True, className="w-100"),
+                                    width=6
+                                ),
+                                dbc.Col(
+                                    dbc.Button([html.I(className="fas fa-file-word me-2"), "Word"], 
+                                             id="btn-word", color="primary", outline=True, className="w-100"),
+                                    width=6
+                                )
+                            ]),
+                            dcc.Download(id="download-component")
+                        ]
+                    )
+                ], className="p-3")
             ], className="shadow-sm")
         ], xs=12, sm=12, md=12, lg=3, xl=3, className="mb-3 mb-lg-0"),  # Full width en móvil/tablet, sidebar en desktop
 
@@ -387,23 +415,24 @@ def relacion_a_grupo(relacion):
     # fallback
     return 'Otros'
 
+# Colores profesionales y armoniosos para las categorías
+colores_categorias = {
+    'Trabajo en Equipo': '#667eea',
+    'Comunicación': '#36d1dc',
+    'Liderazgo': '#f093fb',
+    'Toma de Decisiones': '#fa709a',
+    'Planeación': '#a8edea',
+    'Manejo de Recursos': '#ffd166',
+    'Capacidad de Negociación': '#9795f0',
+    'Innovación y Creatividad': '#fbc2eb',
+    'Gestión del Tiempo': '#38ef7d',
+    'Calidad y Resultados': '#4facfe'
+}
 
-# --- 4. CALLBACK MODIFICADO ---
-# La lógica es la misma, pero las salidas (children) se mejoran con HTML/Bootstrap
-@app.callback(
-    Output('resultado-global', 'children'),
-    Output('graficas-categorias', 'children'),
-    Input('evaluado-dropdown', 'value'),
-    Input('w-auto', 'value'),
-    Input('w-jefe', 'value'),
-    Input('w-colegas', 'value'),
-    Input('w-sub', 'value')
-)
-def actualizar_panel(evaluado, w_auto, w_jefe, w_colegas, w_sub):
+# --- 4. LÓGICA DE CÁLCULO (Refactorizado) ---
+def calcular_datos_dashboard(evaluado, w_auto, w_jefe, w_colegas, w_sub):
     if evaluado is None:
-        resumen = html.P("Selecciona un evaluado", className="text-muted text-center")
-        contenido = html.Div("Selecciona un evaluado para ver los resultados", className="text-center text-muted p-5")
-        return resumen, contenido
+        return None
 
     # Ponderaciones
     weights = {
@@ -414,18 +443,14 @@ def actualizar_panel(evaluado, w_auto, w_jefe, w_colegas, w_sub):
     }
     total = sum(weights.values())
     if total <= 0:
-        resumen = html.P("Error: ponderaciones = 0", className="text-danger text-center")
-        contenido = html.Div("Ajusta las ponderaciones", className="text-center text-danger p-5")
-        return resumen, contenido
+        return {'error': 'Ponderaciones deben sumar > 0'}
 
     weights_norm = {k: v / total for k, v in weights.items()}
 
     # Filtrar datos del evaluado
     df_eval = df[df[COL_EVALUADO] == evaluado]
     if df_eval.empty:
-        resumen = html.P("Sin datos", className="text-warning text-center")
-        contenido = html.Div(f"No hay datos para {evaluado}", className="text-center text-warning p-5")
-        return resumen, contenido
+        return {'error': 'Sin datos'}
 
     df_eval = df_eval.copy()
     df_eval['grupo_ponderacion'] = df_eval[COL_RELACION].map(relacion_a_grupo)
@@ -433,18 +458,9 @@ def actualizar_panel(evaluado, w_auto, w_jefe, w_colegas, w_sub):
     # Calcular promedios por grupo
     grupos = df_eval.groupby('grupo_ponderacion')[comp_cols].mean()
 
-    # --- CONTEO DE EVALUADORES ---
+    # Conteo de evaluadores
     conteo_evaluadores = df_eval['grupo_ponderacion'].value_counts().to_dict()
     total_evaluadores = len(df_eval)
-
-    # Colores para cada tipo de evaluador
-    colores_evaluadores = {
-        'Autoevaluación': '#17a2b8',
-        'Jefe Inmediato': '#dc3545',
-        'Colegas': '#ffc107',
-        'Subordinados': '#28a745',
-        'Otros': '#6c757d'
-    }
 
     # Calcular puntaje final por competencia
     final_por_comp = pd.Series(0.0, index=comp_cols)
@@ -454,349 +470,86 @@ def actualizar_panel(evaluado, w_auto, w_jefe, w_colegas, w_sub):
 
     calificacion_final = final_por_comp.mean()
 
-    # --- RESUMEN CON TARJETA DE EVALUADORES ---
-    resumen = html.Div([
-        # Calificación Final
-        html.H6("Calificación Final", className="text-muted mb-1"),
-        html.H1(f'{calificacion_final:.2f}', className='text-primary fw-bold mb-1', style={'fontSize': '2.5rem'}),
-        html.Small('de 5.0', className="text-muted d-block mb-2"),
-        html.Hr(className="my-2"),
-        html.Div([
-            html.Span(f"{k}: {v:.0%}", className="badge bg-secondary me-1 mb-1")
-            for k, v in weights_norm.items() if v > 0
-        ], className="d-flex flex-wrap justify-content-center"),
-
-        # Separador
-        html.Hr(className="my-3"),
-
-        # Tarjeta de Evaluadores
-        html.Div([
-            html.H6("Evaluadores", className="text-muted mb-3 text-center"),
-            html.Div([
-                html.Div([
-                    html.I(className="fas fa-users", style={'fontSize': '24px', 'color': '#667eea'}),
-                    html.H3(f'{total_evaluadores}', className='text-primary fw-bold mb-0 mt-2'),
-                    html.Small('Total de evaluaciones', className='text-muted d-block')
-                ], className="text-center mb-3 p-2", style={'backgroundColor': '#f8f9fa', 'borderRadius': '8px'}),
-
-                # Desglose por tipo
-                html.Div([
-                    html.Div([
-                        html.Div([
-                            html.Span(
-                                '●',
-                                style={'color': colores_evaluadores.get(tipo, '#6c757d'), 'fontSize': '20px', 'marginRight': '8px'}
-                            ),
-                            html.Span(tipo, className='small fw-bold', style={'fontSize': '0.8rem'}),
-                        ], style={'display': 'flex', 'alignItems': 'center', 'marginBottom': '4px'}),
-                        html.Div([
-                            html.Strong(str(cantidad), className='text-primary', style={'fontSize': '1.1rem'}),
-                            html.Small(f" evaluacion{'es' if cantidad != 1 else ''}", className='text-muted ms-1')
-                        ])
-                    ], className='mb-2 pb-2', style={'borderBottom': '1px solid #e9ecef'} if idx < len(conteo_evaluadores) - 1 else {})
-                    for idx, (tipo, cantidad) in enumerate(sorted(conteo_evaluadores.items(), key=lambda x: x[1], reverse=True))
-                ])
-            ])
-        ])
-    ], className="text-center")
-
-    # --- CREAR GRÁFICAS DE PASTEL POR CATEGORÍA ---
-    graficas = []
-
-    # Colores profesionales y armoniosos para las categorías
-    colores_categorias = {
-        'Trabajo en Equipo': '#667eea',
-        'Comunicación': '#36d1dc',
-        'Liderazgo': '#f093fb',
-        'Toma de Decisiones': '#fa709a',
-        'Planeación': '#a8edea',
-        'Manejo de Recursos': '#ffd166',
-        'Capacidad de Negociación': '#9795f0',
-        'Innovación y Creatividad': '#fbc2eb',
-        'Gestión del Tiempo': '#38ef7d',
-        'Calidad y Resultados': '#4facfe'
-    }
-
-    # Calcular promedios por categoría para el radar hexagonal
+    # Promedios por categoría
     promedios_categorias = {}
     for categoria, comps_cat in categorias_comp.items():
         if comps_cat:
             promedios_categorias[categoria] = final_por_comp[comps_cat].mean()
 
-    # --- GRÁFICO RADAR HEXAGONAL DE TODAS LAS CATEGORÍAS ---
+    # --- GENERACIÓN DE FIGURAS ---
+    
+    # 1. Radar General
     fig_radar_general = go.Figure()
-
     categorias_list = list(promedios_categorias.keys())
     valores_list = list(promedios_categorias.values())
+    
+    # Cerrar polígono
+    if categorias_list:
+        categorias_radar = categorias_list + [categorias_list[0]]
+        valores_radar = valores_list + [valores_list[0]]
+        valores_estandar = [3.5] * len(categorias_radar)
+        
+        fig_radar_general.add_trace(go.Scatterpolar(
+            r=valores_radar, theta=categorias_radar, fill='toself', name='Evaluación Actual',
+            line=dict(color='#667eea', width=3), fillcolor='rgba(102, 126, 234, 0.3)'
+        ))
+        fig_radar_general.add_trace(go.Scatterpolar(
+            r=valores_estandar, theta=categorias_radar, fill=None, name='Estándar Mínimo (3.5)',
+            line=dict(color='#ff6b6b', width=2, dash='dash')
+        ))
+        
+        fig_radar_general.update_layout(
+            polar=dict(radialaxis=dict(visible=True, range=[0, 5])),
+            showlegend=True, margin=dict(t=20, b=80, l=20, r=20), height=400
+        )
 
-    # Cerrar el polígono agregando el primer valor al final
-    categorias_radar = categorias_list + [categorias_list[0]]
-    valores_radar = valores_list + [valores_list[0]]
-
-    # Línea de referencia (estándar mínimo esperado: 3.5)
-    estandar_minimo = 3.5
-    valores_estandar = [estandar_minimo] * len(categorias_radar)
-
-    # Agregar área del evaluado
-    fig_radar_general.add_trace(go.Scatterpolar(
-        r=valores_radar,
-        theta=categorias_radar,
-        fill='toself',
-        name='Evaluación Actual',
-        line=dict(color='#667eea', width=3),
-        fillcolor='rgba(102, 126, 234, 0.3)'
-    ))
-
-    # Agregar línea de estándar mínimo
-    fig_radar_general.add_trace(go.Scatterpolar(
-        r=valores_estandar,
-        theta=categorias_radar,
-        fill=None,
-        name='Estándar Mínimo (3.5)',
-        line=dict(color='#ff6b6b', width=2, dash='dash')
-    ))
-
-    fig_radar_general.update_layout(
-        polar=dict(
-            radialaxis=dict(
-                visible=True,
-                range=[0, 5],
-                showticklabels=True,
-                ticks='outside',
-                gridcolor='#e9ecef'
-            ),
-            bgcolor='white'
-        ),
-        showlegend=True,
-        legend=dict(orientation="h", yanchor="bottom", y=-0.2, xanchor="center", x=0.5),
-        height=400,  # Altura reducida para móviles
-        margin=dict(t=20, b=80, l=20, r=20),  # Márgenes reducidos
-        paper_bgcolor='rgba(0,0,0,0)',
-        font=dict(size=10)  # Fuente más pequeña para móviles
-    )
-
-    # --- DETERMINAR APTITUD PARA EL PUESTO ---
-    # Criterios mejorados con enfoque constructivo:
-    # - Sobresaliente: Calificación >= 4.5
-    # - Alto Desempeño: Calificación >= 4.0 y ninguna categoría < 3.0
-    # - Cumple Expectativas: Calificación >= 3.5 y ninguna categoría < 2.5
-    # - En Desarrollo: Calificación >= 2.5 o algunas categorías < 3.5
-    # - Requiere Apoyo: Calificación < 2.5
-
-    categorias_bajas = [cat for cat, val in promedios_categorias.items() if val < 3.0]
-    categorias_criticas = [cat for cat, val in promedios_categorias.items() if val < 2.5]
-
-    if calificacion_final >= 4.5:
-        estado_aptitud = "SOBRESALIENTE"
-        color_aptitud = "#28a745"  # Verde oscuro
-        icono_aptitud = "⭐"
-        mensaje_aptitud = "Desempeño excepcional en todas las competencias"
-        recomendacion_rh = "Talento clave - Considerar para roles de liderazgo estratégico y mentoría"
-    elif calificacion_final >= 4.0 and not categorias_bajas:
-        estado_aptitud = "ALTO DESEMPEÑO"
-        color_aptitud = "#28a745"  # Verde
-        icono_aptitud = "✓"
-        mensaje_aptitud = "Cumple ampliamente con los estándares del puesto"
-        recomendacion_rh = "Excelente desempeño - Considerar para promoción o proyectos de alto impacto"
-    elif calificacion_final >= 3.5 and not categorias_criticas:
-        estado_aptitud = "CUMPLE EXPECTATIVAS"
-        color_aptitud = "#17a2b8"  # Azul
-        icono_aptitud = "✓"
-        mensaje_aptitud = "Desempeño satisfactorio acorde al puesto"
-        recomendacion_rh = "Mantener nivel actual - Oportunidades de desarrollo en áreas específicas"
-    elif calificacion_final >= 2.5:
-        estado_aptitud = "EN DESARROLLO"
-        color_aptitud = "#ffc107"  # Amarillo
-        icono_aptitud = "⚡"
-        areas_mejora = ', '.join(categorias_bajas[:2]) if categorias_bajas else 'algunas competencias'
-        mensaje_aptitud = f"Oportunidades de crecimiento en: {areas_mejora}"
-        recomendacion_rh = "Plan de desarrollo personalizado - Capacitación y seguimiento trimestral"
-    else:
-        estado_aptitud = "REQUIERE APOYO"
-        color_aptitud = "#ff6b6b"  # Rojo suave
-        icono_aptitud = "📋"
-        areas_prioritarias = ', '.join(categorias_criticas[:2]) if categorias_criticas else 'múltiples competencias'
-        mensaje_aptitud = f"Requiere apoyo inmediato en: {areas_prioritarias}"
-        recomendacion_rh = "Plan de acción intensivo - Coaching, mentoría y revisión mensual de avances"
-
-    # --- CALCULAR KPIs ADICIONALES ---
-    # Consistencia (desviación estándar entre categorías - menor es mejor)
-    consistencia = 5 - (final_por_comp.std() * 2)  # Normalizado a escala 0-5
-    consistencia = max(0, min(5, consistencia))
-
-    # Brecha de mejora (distancia al objetivo ideal 5.0)
-    brecha_mejora = 5.0 - calificacion_final
-    porcentaje_brecha = (brecha_mejora / 5.0) * 100
-
-    # Nivel de cumplimiento (porcentaje sobre estándar mínimo 3.5)
-    if calificacion_final >= 3.5:
-        nivel_cumplimiento = min(100, ((calificacion_final - 3.5) / 1.5) * 100)
-    else:
-        nivel_cumplimiento = (calificacion_final / 3.5) * 100
-
-    # Calcular promedio general de todos los evaluados para comparación
-    promedios_empresa = df.groupby(COL_EVALUADO)[comp_cols].mean().mean(axis=1)
-    promedio_empresa = promedios_empresa.mean()
-
-    # Posición percentil del evaluado
-    percentil = (promedios_empresa < calificacion_final).sum() / len(promedios_empresa) * 100
-
-    # Tarjeta de Aptitud MEJORADA
-    tarjeta_aptitud = dbc.Card([
-        dbc.CardBody([
-            html.Div([
-                html.Span(icono_aptitud, style={'fontSize': '40px', 'color': color_aptitud}),
-                html.H4(estado_aptitud, className="fw-bold mt-2 mb-1", style={'color': color_aptitud}),
-                html.P(mensaje_aptitud, className="small text-muted mb-2"),
-                html.Hr(className="my-2"),
-                html.Div([
-                    html.Small("📋 Recomendación RH:", className="fw-bold d-block text-dark mb-1"),
-                    html.Small(recomendacion_rh, className="text-muted")
-                ], className="text-start px-2")
-            ], className="text-center")
-        ])
-    ], className="shadow-sm border-0", style={'borderLeft': f'5px solid {color_aptitud}'})
-
-    # --- TARJETAS DE KPIs ---
-    tarjetas_kpis = dbc.Row([
-        # KPI 1: Nivel de Cumplimiento
-        dbc.Col([
-            dbc.Card([
-                dbc.CardBody([
-                    html.Div([
-                        html.I(className="fas fa-check-circle", style={'fontSize': '24px', 'color': '#667eea'}),
-                        html.H6("Nivel de Cumplimiento", className="text-muted mt-2 mb-1", style={'fontSize': '11px'}),
-                        html.H4(f"{nivel_cumplimiento:.0f}%", className="fw-bold text-primary mb-0")
-                    ], className="text-center")
-                ], className="p-2")
-            ], className="shadow-sm border-0", style={'borderTop': '3px solid #667eea'})
-        ], width=6, lg=3, className="mb-2"),
-
-        # KPI 2: Consistencia
-        dbc.Col([
-            dbc.Card([
-                dbc.CardBody([
-                    html.Div([
-                        html.I(className="fas fa-balance-scale", style={'fontSize': '24px', 'color': '#36d1dc'}),
-                        html.H6("Consistencia", className="text-muted mt-2 mb-1", style={'fontSize': '11px'}),
-                        html.H4(f"{consistencia:.1f}/5.0", className="fw-bold text-info mb-0")
-                    ], className="text-center")
-                ], className="p-2")
-            ], className="shadow-sm border-0", style={'borderTop': '3px solid #36d1dc'})
-        ], width=6, lg=3, className="mb-2"),
-
-        # KPI 3: Percentil
-        dbc.Col([
-            dbc.Card([
-                dbc.CardBody([
-                    html.Div([
-                        html.I(className="fas fa-chart-line", style={'fontSize': '24px', 'color': '#f093fb'}),
-                        html.H6("Percentil", className="text-muted mt-2 mb-1", style={'fontSize': '11px'}),
-                        html.H4(f"Top {100-percentil:.0f}%", className="fw-bold text-success mb-0")
-                    ], className="text-center")
-                ], className="p-2")
-            ], className="shadow-sm border-0", style={'borderTop': '3px solid #f093fb'})
-        ], width=6, lg=3, className="mb-2"),
-
-        # KPI 4: Brecha de Mejora
-        dbc.Col([
-            dbc.Card([
-                dbc.CardBody([
-                    html.Div([
-                        html.I(className="fas fa-arrow-up", style={'fontSize': '24px', 'color': '#ffd166'}),
-                        html.H6("Brecha de Mejora", className="text-muted mt-2 mb-1", style={'fontSize': '11px'}),
-                        html.H4(f"{brecha_mejora:.2f}", className="fw-bold text-warning mb-0"),
-                        html.Small(f"({porcentaje_brecha:.0f}%)", className="text-muted", style={'fontSize': '10px'})
-                    ], className="text-center")
-                ], className="p-2")
-            ], className="shadow-sm border-0", style={'borderTop': '3px solid #ffd166'})
-        ], width=6, lg=3, className="mb-2")
-    ], className="mb-3")
-
-    # --- GRÁFICO RADAR HEXAGONAL MEJORADO CON 3 CAPAS ---
+    # 2. Radar Avanzado
     fig_radar_avanzado = go.Figure()
+    if categorias_list:
+        # Capas de referencia
+        fig_radar_avanzado.add_trace(go.Scatterpolar(
+            r=[4.5]*len(categorias_radar), theta=categorias_radar, fill='toself', name='Sobresaliente',
+            line=dict(color='#28a745', width=1, dash='dot'), fillcolor='rgba(40, 167, 69, 0.1)'
+        ))
+        fig_radar_avanzado.add_trace(go.Scatterpolar(
+            r=[3.5]*len(categorias_radar), theta=categorias_radar, fill='toself', name='Aceptable',
+            line=dict(color='#ffc107', width=1, dash='dot'), fillcolor='rgba(255, 193, 7, 0.1)'
+        ))
+        
+        # Promedio Empresa
+        promedios_empresa_cat = []
+        for categoria, comps_cat in categorias_comp.items():
+            if comps_cat:
+                # Calcular promedio global de la empresa para estas competencias (scalar)
+                prom = df[comps_cat].mean().mean()
+                promedios_empresa_cat.append(prom)
+        
+        if promedios_empresa_cat:
+            prom_empresa_radar = promedios_empresa_cat + [promedios_empresa_cat[0]]
+            fig_radar_avanzado.add_trace(go.Scatterpolar(
+                r=prom_empresa_radar, theta=categorias_radar, fill=None, name='Promedio Empresa',
+                line=dict(color='#6c757d', width=2, dash='dash')
+            ))
 
-    # Capa 1: Nivel Sobresaliente (4.5-5.0)
-    valores_sobresaliente = [4.5] * len(categorias_radar)
-    fig_radar_avanzado.add_trace(go.Scatterpolar(
-        r=valores_sobresaliente,
-        theta=categorias_radar,
-        fill='toself',
-        name='Nivel Sobresaliente (4.5+)',
-        line=dict(color='#28a745', width=1, dash='dot'),
-        fillcolor='rgba(40, 167, 69, 0.1)'
-    ))
+        # Evaluado
+        fig_radar_avanzado.add_trace(go.Scatterpolar(
+            r=valores_radar, theta=categorias_radar, fill='toself', name=evaluado,
+            line=dict(color='#667eea', width=3), fillcolor='rgba(102, 126, 234, 0.3)'
+        ))
+        
+        fig_radar_avanzado.update_layout(
+            polar=dict(radialaxis=dict(visible=True, range=[0, 5])),
+            showlegend=True, height=500, margin=dict(t=40, b=40, l=40, r=180)
+        )
 
-    # Capa 2: Nivel Aceptable (3.5-4.5)
-    valores_aceptable = [3.5] * len(categorias_radar)
-    fig_radar_avanzado.add_trace(go.Scatterpolar(
-        r=valores_aceptable,
-        theta=categorias_radar,
-        fill='toself',
-        name='Nivel Aceptable (3.5+)',
-        line=dict(color='#ffc107', width=1, dash='dot'),
-        fillcolor='rgba(255, 193, 7, 0.1)'
-    ))
-
-    # Capa 3: Promedio de la Empresa
-    promedios_empresa_cat = []
-    for categoria, comps_cat in categorias_comp.items():
-        if comps_cat:
-            prom_empresa = df.groupby(COL_EVALUADO)[comps_cat].mean().mean()
-            promedios_empresa_cat.append(prom_empresa)
-    promedios_empresa_cat_radar = promedios_empresa_cat + [promedios_empresa_cat[0]]
-
-    fig_radar_avanzado.add_trace(go.Scatterpolar(
-        r=promedios_empresa_cat_radar,
-        theta=categorias_radar,
-        fill=None,
-        name=f'Promedio Empresa ({promedio_empresa:.2f})',
-        line=dict(color='#6c757d', width=2, dash='dash')
-    ))
-
-    # Capa 4: Evaluación del Empleado
-    fig_radar_avanzado.add_trace(go.Scatterpolar(
-        r=valores_radar,
-        theta=categorias_radar,
-        fill='toself',
-        name=f'{evaluado} ({calificacion_final:.2f})',
-        line=dict(color='#667eea', width=3),
-        fillcolor='rgba(102, 126, 234, 0.3)'
-    ))
-
-    fig_radar_avanzado.update_layout(
-        polar=dict(
-            radialaxis=dict(
-                visible=True,
-                range=[0, 5],
-                showticklabels=True,
-                ticks='outside',
-                gridcolor='#e9ecef',
-                tickfont=dict(size=10)
-            ),
-            bgcolor='white'
-        ),
-        showlegend=True,
-        legend=dict(
-            orientation="v",
-            yanchor="middle",
-            y=0.5,
-            xanchor="left",
-            x=1.05,
-            font=dict(size=10)
-        ),
-        height=500,
-        margin=dict(t=40, b=40, l=40, r=180),
-        paper_bgcolor='rgba(0,0,0,0)',
-        font=dict(size=10)
-    )
-
-    # --- MATRIZ DE RIESGO/POTENCIAL ---
-    # Potencial = promedio de categorías de liderazgo, innovación y toma de decisiones
+    # 3. Matriz 9-Box
+    # 3. Matriz 9-Box
     categorias_potencial = ['Liderazgo', 'Innovación y Creatividad', 'Toma de Decisiones']
-    potencial = sum([promedios_categorias.get(cat, 0) for cat in categorias_potencial]) / len([c for c in categorias_potencial if c in promedios_categorias])
-
-    # Desempeño = calificación final
+    cats_presentes = [c for c in categorias_potencial if c in promedios_categorias]
+    if cats_presentes:
+        potencial = sum([promedios_categorias.get(cat, 0) for cat in cats_presentes]) / len(cats_presentes)
+    else:
+        potencial = 0
     desempeno = calificacion_final
 
     # Determinar cuadrante
@@ -822,144 +575,25 @@ def actualizar_panel(evaluado, w_auto, w_jefe, w_colegas, w_sub):
         accion_rh = "Acción: Plan de mejora de 90 días con seguimiento semanal"
 
     fig_matriz = go.Figure()
-
-    # Agregar líneas de división de cuadrantes
     fig_matriz.add_hline(y=4.0, line_dash="dash", line_color="gray", opacity=0.5)
     fig_matriz.add_vline(x=4.0, line_dash="dash", line_color="gray", opacity=0.5)
-
-    # Agregar punto del evaluado
+    
     fig_matriz.add_trace(go.Scatter(
-        x=[potencial],
-        y=[desempeno],
-        mode='markers+text',
+        x=[potencial], y=[desempeno], mode='markers+text',
         marker=dict(size=20, color=color_cuadrante, line=dict(width=2, color='white')),
-        text=[evaluado[:15]],
-        textposition="top center",
-        textfont=dict(size=12, color='#2c3e50'),
-        hovertemplate=f'<b>{evaluado}</b><br>Potencial: {potencial:.2f}<br>Desempeño: {desempeno:.2f}<extra></extra>',
-        showlegend=False
+        text=[evaluado[:15]], textposition="top center"
     ))
-
-    # Agregar otros evaluados como referencia (puntos más pequeños)
-    otros_evaluados = []
-    otros_potencial = []
-    otros_desempeno = []
-
-    for eval_nombre in df[COL_EVALUADO].unique():
-        if eval_nombre != evaluado:
-            df_otro = df[df[COL_EVALUADO] == eval_nombre]
-            df_otro = df_otro.copy()
-            df_otro['grupo_ponderacion'] = df_otro[COL_RELACION].map(relacion_a_grupo)
-            grupos_otro = df_otro.groupby('grupo_ponderacion')[comp_cols].mean()
-
-            final_por_comp_otro = pd.Series(0.0, index=comp_cols)
-            for grupo, peso in weights_norm.items():
-                if grupo in grupos_otro.index:
-                    final_por_comp_otro = final_por_comp_otro + grupos_otro.loc[grupo].astype(float).fillna(0) * peso
-
-            promedios_cat_otro = {}
-            for categoria, comps_cat in categorias_comp.items():
-                if comps_cat:
-                    promedios_cat_otro[categoria] = final_por_comp_otro[comps_cat].mean()
-
-            potencial_otro = sum([promedios_cat_otro.get(cat, 0) for cat in categorias_potencial]) / len([c for c in categorias_potencial if c in promedios_cat_otro])
-            desempeno_otro = final_por_comp_otro.mean()
-
-            otros_evaluados.append(eval_nombre)
-            otros_potencial.append(potencial_otro)
-            otros_desempeno.append(desempeno_otro)
-
-    if otros_evaluados:
-        fig_matriz.add_trace(go.Scatter(
-            x=otros_potencial,
-            y=otros_desempeno,
-            mode='markers',
-            marker=dict(size=8, color='lightgray', opacity=0.6),
-            text=otros_evaluados,
-            hovertemplate='<b>%{text}</b><br>Potencial: %{x:.2f}<br>Desempeño: %{y:.2f}<extra></extra>',
-            showlegend=False
-        ))
-
-    # Anotaciones de cuadrantes
-    fig_matriz.add_annotation(x=4.75, y=4.75, text="Estrellas", showarrow=False,
-                             font=dict(size=11, color='gray'), opacity=0.5)
-    fig_matriz.add_annotation(x=2.5, y=4.75, text="Contribuidores", showarrow=False,
-                             font=dict(size=11, color='gray'), opacity=0.5)
-    fig_matriz.add_annotation(x=4.75, y=2.5, text="Emergentes", showarrow=False,
-                             font=dict(size=11, color='gray'), opacity=0.5)
-    fig_matriz.add_annotation(x=2.5, y=2.5, text="En Desarrollo", showarrow=False,
-                             font=dict(size=11, color='gray'), opacity=0.5)
-
+    
     fig_matriz.update_layout(
-        xaxis_title="Potencial de Liderazgo",
-        yaxis_title="Desempeño Actual",
-        xaxis=dict(range=[0, 5], showgrid=True, gridcolor='#f0f0f0'),
-        yaxis=dict(range=[0, 5], showgrid=True, gridcolor='#f0f0f0'),
-        height=450,
-        plot_bgcolor='white',
-        paper_bgcolor='rgba(0,0,0,0)',
-        margin=dict(t=20, b=60, l=60, r=20)
+        xaxis_title="Potencial", yaxis_title="Desempeño",
+        xaxis=dict(range=[0, 5]), yaxis=dict(range=[0, 5]),
+        height=450, plot_bgcolor='white', margin=dict(t=20, b=60, l=60, r=20)
     )
 
-    tarjeta_matriz = dbc.Card([
-        dbc.CardBody([
-            html.H5("Matriz de Potencial vs. Desempeño", className="card-title text-primary mb-1"),
-            html.Small("Posicionamiento estratégico del talento", className="text-muted d-block mb-3"),
-            dcc.Graph(figure=fig_matriz, config={'displayModeBar': False}, style={'height': '450px'}),
-            html.Div([
-                html.Div([
-                    html.H6(cuadrante, className="fw-bold mb-1", style={'color': color_cuadrante}),
-                    html.P(descripcion_cuadrante, className="small text-muted mb-2"),
-                    html.P(accion_rh, className="small fw-bold text-dark mb-0")
-                ], className="p-3 rounded", style={'backgroundColor': '#f8f9fa'})
-            ])
-        ])
-    ], className="shadow-sm")  # Removido h-100 y agregado altura fija al gráfico
-
-    # --- IDENTIFICAR FORTALEZAS Y ÁREAS DE MEJORA ---
-    # Top 3 fortalezas (categorías con mejor puntaje)
-    fortalezas = sorted(promedios_categorias.items(), key=lambda x: x[1], reverse=True)[:3]
-    # Top 3 áreas de mejora (categorías con menor puntaje)
-    mejoras = sorted(promedios_categorias.items(), key=lambda x: x[1])[:3]
-
-    tabla_analisis = dbc.Card([
-        dbc.CardBody([
-            dbc.Row([
-                dbc.Col([
-                    html.H6("🌟 Fortalezas", className="text-success fw-bold mb-3"),
-                    html.Ul([
-                        html.Li([
-                            html.Strong(cat),
-                            f": {val:.2f}/5.0"
-                        ], className="mb-2") for cat, val in fortalezas
-                    ], className="mb-0")
-                ], width=6),
-                dbc.Col([
-                    html.H6("📈 Áreas de Mejora", className="text-warning fw-bold mb-3"),
-                    html.Ul([
-                        html.Li([
-                            html.Strong(cat),
-                            f": {val:.2f}/5.0"
-                        ], className="mb-2") for cat, val in mejoras
-                    ], className="mb-0")
-                ], width=6)
-            ])
-        ])
-    ], className="shadow-sm")
-
-    # --- GRÁFICO DE COMPARACIÓN POR EVALUADOR ---
+    # 4. Comparativa
     fig_comparacion = go.Figure()
-
-    categorias_nombres = list(promedios_categorias.keys())
-
-    # Agregar una barra por cada grupo evaluador
-    colores_grupos = {
-        'Autoevaluación': '#17a2b8',
-        'Jefe Inmediato': '#dc3545',
-        'Colegas': '#ffc107',
-        'Subordinados': '#28a745'
-    }
-
+    colores_grupos = {'Autoevaluación': '#17a2b8', 'Jefe Inmediato': '#dc3545', 'Colegas': '#ffc107', 'Subordinados': '#28a745'}
+    
     for grupo in grupos.index:
         promedios_grupo_cat = []
         for categoria, comps_cat in categorias_comp.items():
@@ -968,244 +602,377 @@ def actualizar_panel(evaluado, w_auto, w_jefe, w_colegas, w_sub):
                 promedios_grupo_cat.append(prom)
             else:
                 promedios_grupo_cat.append(0)
-
+        
         fig_comparacion.add_trace(go.Bar(
-            name=grupo,
-            x=categorias_nombres,
-            y=promedios_grupo_cat,
+            name=grupo, x=categorias_list, y=promedios_grupo_cat,
             marker_color=colores_grupos.get(grupo, '#6c757d')
         ))
+    
+    fig_comparacion.update_layout(barmode='group', height=400, margin=dict(t=80, b=100, l=50, r=50))
 
-    fig_comparacion.update_layout(
-        barmode='group',
-        title="Comparación por Tipo de Evaluador",
-        xaxis_title="Categorías",
-        yaxis_title="Calificación",
-        height=400,
-        yaxis=dict(range=[0, 5]),
-        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
-        margin=dict(t=80, b=100, l=50, r=50),
-        paper_bgcolor='rgba(0,0,0,0)',
-        plot_bgcolor='white',
-        xaxis=dict(tickangle=-45),
-        font=dict(size=11)
-    )
-
-    # --- ORGANIZAR LAYOUT COMPLETO ---
-    contenido = html.Div([
-        # Fila 0: KPIs
-        tarjetas_kpis,
-
-        # Explicación de KPIs
-        dbc.Row([
-            dbc.Col([
-                dbc.Alert([
-                    html.I(className="fas fa-info-circle me-2"),
-                    html.Strong("Fuente de datos: "),
-                    f"Basado en {total_evaluadores} evaluaciones recibidas. ",
-                    html.Strong("Nivel de Cumplimiento: "),
-                    "Porcentaje de logro sobre el estándar mínimo esperado (3.5/5.0). ",
-                    html.Strong("Consistencia: "),
-                    "Uniformidad en el desempeño entre categorías (5.0 = muy uniforme). ",
-                    html.Strong("Percentil: "),
-                    f"Posición relativa respecto a {len(promedios_empresa)} colaboradores evaluados. ",
-                    html.Strong("Brecha: "),
-                    "Distancia al objetivo ideal (5.0/5.0)."
-                ], color="info", className="small mb-4", style={'fontSize': '0.85rem'})
-            ], width=12)
-        ]),
-
-        # Primera fila: Radar Avanzado + Matriz de Potencial
-        dbc.Row([
-            dbc.Col([
-                dbc.Card([
-                    dbc.CardBody([
-                        html.H5("Análisis de Madurez por Habilidades", className="card-title text-primary mb-1"),
-                        html.Small("Comparación con benchmarks y promedio empresarial", className="text-muted d-block mb-3"),
-                        dcc.Graph(figure=fig_radar_avanzado, config={'displayModeBar': False}, style={'height': '500px'}),
-                        html.Hr(className="my-2"),
-                        html.Div([
-                            html.I(className="fas fa-chart-area me-2", style={'color': '#667eea'}),
-                            html.Small([
-                                html.Strong("¿Qué muestra? "),
-                                f"Compara el desempeño del evaluado en {len(promedios_categorias)} categorías contra 3 referencias: ",
-                                html.Span("(1) Nivel Sobresaliente (4.5+)", className="text-success fw-bold"),
-                                ", (2) Nivel Aceptable (3.5+), y ",
-                                html.Span(f"(3) Promedio de la empresa ({promedio_empresa:.2f})", className="text-secondary fw-bold"),
-                                ". Los datos provienen de la ponderación de autoevaluación, evaluación de jefe, colegas y subordinados según los porcentajes configurados."
-                            ], className="text-muted", style={'fontSize': '0.8rem'})
-                        ], className="px-2")
-                    ])
-                ], className="shadow-sm")
-            ], width=12, lg=7, className="mb-3"),
-
-            dbc.Col([
-                tarjeta_matriz,
-                html.Div([
-                    html.I(className="fas fa-compass me-2", style={'color': '#f093fb'}),
-                    html.Small([
-                        html.Strong("¿Qué muestra? "),
-                        "Matriz de talento 9-box simplificada. ",
-                        html.Strong("Eje X (Potencial): "),
-                        f"Promedio de {len([c for c in categorias_potencial if c in promedios_categorias])} categorías estratégicas (Liderazgo, Innovación, Toma de Decisiones). ",
-                        html.Strong("Eje Y (Desempeño): "),
-                        "Calificación final ponderada. Los puntos grises representan otros colaboradores para contexto comparativo."
-                    ], className="text-muted", style={'fontSize': '0.75rem'})
-                ], className="mt-2 p-2 rounded", style={'backgroundColor': '#f8f9fa'})
-            ], width=12, lg=5, className="mb-3")
-        ]),
-
-        # Segunda fila: Radar básico + Aptitud + Análisis
-        dbc.Row([
-            dbc.Col([
-                dbc.Card([
-                    dbc.CardBody([
-                        html.H5("Perfil de Competencias", className="card-title text-primary mb-3"),
-                        dcc.Graph(figure=fig_radar_general, config={'displayModeBar': False}, style={'height': '400px'}),
-                        html.Hr(className="my-2"),
-                        html.Div([
-                            html.I(className="fas fa-radar me-2", style={'color': '#36d1dc'}),
-                            html.Small([
-                                html.Strong("¿Qué muestra? "),
-                                f"Vista simplificada del perfil de competencias en {len(promedios_categorias)} categorías. ",
-                                "La línea azul representa el desempeño actual del evaluado y la línea roja punteada marca el estándar mínimo esperado (3.5/5.0). ",
-                                "Áreas fuera del estándar requieren atención prioritaria."
-                            ], className="text-muted", style={'fontSize': '0.8rem'})
-                        ], className="px-2")
-                    ])
-                ], className="shadow-sm")
-            ], width=12, lg=6, className="mb-3"),
-
-            dbc.Col([
-                tarjeta_aptitud,
-                html.Div(style={'height': '15px'}),
-                tabla_analisis,
-                html.Div([
-                    html.I(className="fas fa-balance-scale-right me-2", style={'color': '#ffc107'}),
-                    html.Small([
-                        html.Strong("Aptitud: "),
-                        "Determinada por calificación final y número de categorías bajo el estándar. ",
-                        html.Strong("Fortalezas/Mejoras: "),
-                        "Top 3 categorías con mejor y menor desempeño basado en la ponderación de todas las evaluaciones recibidas."
-                    ], className="text-muted", style={'fontSize': '0.75rem'})
-                ], className="mt-2 p-2 rounded", style={'backgroundColor': '#f8f9fa'})
-            ], width=12, lg=6, className="mb-3")
-        ]),
-
-        # Tercera fila: Comparación por evaluador
-        dbc.Row([
-            dbc.Col([
-                dbc.Card([
-                    dbc.CardBody([
-                        dcc.Graph(figure=fig_comparacion, config={'displayModeBar': False}, style={'height': '400px'}),
-                        html.Hr(className="my-2"),
-                        html.Div([
-                            html.I(className="fas fa-users-between-lines me-2", style={'color': '#28a745'}),
-                            html.Small([
-                                html.Strong("¿Qué muestra? "),
-                                "Comparación de cómo cada tipo de evaluador (autoevaluación, jefe, colegas, subordinados) califica al colaborador en cada categoría. ",
-                                "Permite identificar discrepancias de percepción entre grupos. ",
-                                html.Strong("Nota: "),
-                                "Solo se muestran grupos con evaluaciones disponibles. Las diferencias significativas pueden indicar áreas de desarrollo en comunicación o percepción del desempeño."
-                            ], className="text-muted", style={'fontSize': '0.8rem'})
-                        ], className="px-2 pb-2")
-                    ])
-                ], className="shadow-sm")
-            ], width=12, className="mb-4")
-        ]),
-
-        # Cuarta fila: Grid de gráficas de dona por categoría
-        dbc.Row([
-            dbc.Col([
-                html.H5("Detalle por Categoría", className="text-primary mb-2"),
-                html.P([
-                    html.I(className="fas fa-chart-pie me-2", style={'color': '#667eea'}),
-                    html.Small([
-                        "Cada dona representa el porcentaje de logro en una categoría específica. ",
-                        "El número central es la calificación ponderada final (escala 1-5). ",
-                        "El badge inferior indica cuántas competencias individuales componen cada categoría.",
-                        html.Strong(" Datos: ", className="ms-2"),
-                        f"Resultado de promediar {len(comp_cols)} competencias evaluadas, agrupadas en {len(categorias_comp)} categorías según palabras clave."
-                    ], className="text-muted", style={'fontSize': '0.85rem'})
-                ], className="mb-3")
-            ], width=12)
-        ])
-    ])
-
+    # 5. Gráficas de Pastel (Donas) por Categoría
+    figs_categorias = {}
     for categoria, comps_cat in categorias_comp.items():
-        if not comps_cat:
-            continue
-
+        if not comps_cat: continue
         promedio_cat = final_por_comp[comps_cat].mean()
         porcentaje = (promedio_cat / 5.0) * 100
-        porcentaje_faltante = 100 - porcentaje
-
+        
         fig_pastel = go.Figure(data=[go.Pie(
-            labels=['Logrado', 'Por mejorar'],
-            values=[porcentaje, porcentaje_faltante],
-            hole=0.65,
-            marker=dict(
-                colors=[colores_categorias.get(categoria, '#667eea'), '#f0f0f0'],
-                line=dict(color='white', width=2)
-            ),
-            textinfo='none',
-            hovertemplate='%{label}: %{value:.1f}%<extra></extra>'
+            labels=['Logrado', 'Por mejorar'], values=[porcentaje, 100-porcentaje], hole=0.65,
+            marker=dict(colors=[colores_categorias.get(categoria, '#667eea'), '#f0f0f0'], line=dict(color='white', width=2)),
+            textinfo='none', hovertemplate='%{label}: %{value:.1f}%<extra></extra>'
         )])
+        fig_pastel.update_layout(showlegend=False, height=180, margin=dict(t=5, b=5, l=5, r=5), paper_bgcolor='rgba(0,0,0,0)',
+            annotations=[dict(text=f'<b style="font-size:20px">{promedio_cat:.2f}</b>', x=0.5, y=0.5, showarrow=False)])
+        
+        figs_categorias[f'cat_{categoria}'] = fig_pastel
 
-        fig_pastel.update_layout(
-            showlegend=False,
-            height=180,
-            margin=dict(t=5, b=5, l=5, r=5),
-            paper_bgcolor='rgba(0,0,0,0)',
-            annotations=[
-                dict(
-                    text=f'<b style="font-size:20px">{promedio_cat:.2f}</b><br><span style="font-size:11px; color:#888">de 5.0</span>',
-                    x=0.5, y=0.5,
-                    font=dict(size=14, color='#2c3e50'),
-                    showarrow=False
-                )
-            ]
-        )
+    # Textos y KPIs
+    categorias_bajas = [cat for cat, val in promedios_categorias.items() if val < 3.0]
+    categorias_criticas = [cat for cat, val in promedios_categorias.items() if val < 2.5]
+    
+    if calificacion_final >= 4.5:
+        estado_aptitud = "SOBRESALIENTE"
+        color_aptitud = "#28a745"
+        mensaje_aptitud = "Desempeño excepcional en todas las competencias"
+        recomendacion_rh = "Talento clave - Considerar para roles de liderazgo estratégico"
+    elif calificacion_final >= 4.0 and not categorias_bajas:
+        estado_aptitud = "ALTO DESEMPEÑO"
+        color_aptitud = "#28a745"
+        mensaje_aptitud = "Cumple ampliamente con los estándares del puesto"
+        recomendacion_rh = "Excelente desempeño - Considerar para promoción"
+    elif calificacion_final >= 3.5 and not categorias_criticas:
+        estado_aptitud = "CUMPLE EXPECTATIVAS"
+        color_aptitud = "#17a2b8"
+        mensaje_aptitud = "Desempeño satisfactorio acorde al puesto"
+        recomendacion_rh = "Mantener nivel actual - Oportunidades de desarrollo"
+    elif calificacion_final >= 2.5:
+        estado_aptitud = "EN DESARROLLO"
+        color_aptitud = "#ffc107"
+        mensaje_aptitud = f"Oportunidades de crecimiento en: {', '.join(categorias_bajas[:2])}"
+        recomendacion_rh = "Plan de desarrollo personalizado"
+    else:
+        estado_aptitud = "REQUIERE APOYO"
+        color_aptitud = "#ff6b6b"
+        mensaje_aptitud = f"Requiere apoyo inmediato en: {', '.join(categorias_criticas[:2])}"
+        recomendacion_rh = "Plan de acción intensivo"
 
-        tarjeta = dbc.Col([
-            dbc.Card([
-                dbc.CardBody([
+    # KPIs adicionales
+    consistencia = max(0, min(5, 5 - (final_por_comp.std() * 2)))
+    brecha_mejora = 5.0 - calificacion_final
+    percentil = (df.groupby(COL_EVALUADO)[comp_cols].mean().mean(axis=1) < calificacion_final).mean() * 100
+    nivel_cumplimiento = min(100, ((calificacion_final - 3.5) / 1.5) * 100) if calificacion_final >= 3.5 else (calificacion_final / 3.5) * 100
+
+    return {
+        'meta': {
+            'evaluado': evaluado,
+            'total_evaluadores': total_evaluadores,
+            'conteo_evaluadores': conteo_evaluadores
+        },
+        'kpis': {
+            'calificacion_final': calificacion_final,
+            'consistencia': consistencia,
+            'brecha_mejora': brecha_mejora,
+            'percentil': percentil,
+            'nivel_cumplimiento': nivel_cumplimiento
+        },
+        'figuras': {
+            'radar_general': fig_radar_general,
+            'radar_avanzado': fig_radar_avanzado,
+            'matriz': fig_matriz,
+            'comparacion': fig_comparacion,
+            **figs_categorias
+        },
+        'textos': {
+            'estado_aptitud': estado_aptitud,
+            'color_aptitud': color_aptitud,
+            'mensaje_aptitud': mensaje_aptitud,
+            'recomendacion_rh': recomendacion_rh,
+            'cuadrante': cuadrante,
+            'color_cuadrante': color_cuadrante,
+            'descripcion_cuadrante': descripcion_cuadrante,
+            'accion_rh': accion_rh,
+            'fortalezas': sorted(promedios_categorias.items(), key=lambda x: x[1], reverse=True)[:3],
+            'mejoras': sorted(promedios_categorias.items(), key=lambda x: x[1])[:3]
+        },
+        'data_raw': {
+            'final_por_comp': final_por_comp,
+            'colores_categorias': colores_categorias,
+            'promedios_categorias': promedios_categorias,
+            'promedios_empresa_cat': promedios_empresa_cat if 'promedios_empresa_cat' in locals() else [],
+            'promedios_por_grupo': {
+                grupo: [grupos.loc[grupo][categorias_comp[cat]].mean() if categorias_comp[cat] else 0 for cat in promedios_categorias.keys()]
+                for grupo in grupos.index
+            }
+        }
+    }
+
+# --- 4. CALLBACK MODIFICADO ---
+@app.callback(
+    Output('resultado-global', 'children'),
+    Output('graficas-categorias', 'children'),
+    Input('evaluado-dropdown', 'value'),
+    Input('w-auto', 'value'),
+    Input('w-jefe', 'value'),
+    Input('w-colegas', 'value'),
+    Input('w-sub', 'value')
+)
+def actualizar_panel(evaluado, w_auto, w_jefe, w_colegas, w_sub):
+    try:
+        datos = calcular_datos_dashboard(evaluado, w_auto, w_jefe, w_colegas, w_sub)
+        
+        if datos is None or 'error' in datos:
+            msg = datos.get('error', 'Selecciona un evaluado') if datos else 'Selecciona un evaluado'
+            resumen = html.P(msg, className="text-muted text-center")
+            contenido = html.Div(msg, className="text-center text-muted p-5")
+            return resumen, contenido
+
+        # Desempaquetar datos
+        meta = datos['meta']
+        kpis = datos['kpis']
+        figs = datos['figuras']
+        textos = datos['textos']
+        
+        # --- RESUMEN CON TARJETA DE EVALUADORES ---
+        resumen = html.Div([
+            # Calificación Final
+            html.H6("Calificación Final", className="text-muted mb-1"),
+            html.H1(f"{kpis['calificacion_final']:.2f}", className='text-primary fw-bold mb-1', style={'fontSize': '2.5rem'}),
+            html.Small('de 5.0', className="text-muted d-block mb-2"),
+            html.Hr(className="my-2"),
+            
+            # Tarjeta de Evaluadores
+            html.Div([
+                html.H6("Evaluadores", className="text-muted mb-3 text-center"),
+                html.Div([
                     html.Div([
-                        html.I(className="fas fa-star", style={'color': colores_categorias.get(categoria, '#667eea'), 'marginRight': '8px', 'fontSize': '16px'}),
-                        html.Span(categoria, className="fw-bold")
-                    ], className="text-center mb-2", style={'fontSize': '13px', 'color': '#2c3e50', 'minHeight': '20px'}),
-                    dcc.Graph(figure=fig_pastel, config={'displayModeBar': False}, style={'height': '180px'}),
+                        html.I(className="fas fa-users", style={'fontSize': '24px', 'color': '#667eea'}),
+                        html.H3(f"{meta['total_evaluadores']}", className='text-primary fw-bold mb-0 mt-2'),
+                        html.Small('Total de evaluaciones', className='text-muted d-block')
+                    ], className="text-center mb-3 p-2", style={'backgroundColor': '#f8f9fa', 'borderRadius': '8px'}),
+
+                    # Desglose por tipo
                     html.Div([
-                        html.Span(
-                            f'{len(comps_cat)} competencia{"s" if len(comps_cat) > 1 else ""}',
-                            className="badge",
-                            style={
-                                'backgroundColor': colores_categorias.get(categoria, '#667eea'),
-                                'color': 'white',
-                                'fontSize': '10px'
-                            }
-                        )
-                    ], className="text-center mt-1")
-                ], className="p-2", style={'height': '260px', 'display': 'flex', 'flexDirection': 'column', 'justifyContent': 'space-between'})
-            ], className="shadow-sm border-0",
-               style={
-                   'borderTop': f'4px solid {colores_categorias.get(categoria, "#667eea")}',
-                   'borderRadius': '8px',
-                   'transition': 'transform 0.2s',
-                   'background': 'linear-gradient(135deg, #ffffff 0%, #f8f9fa 100%)',
-                   'height': '280px',
-                   'overflow': 'hidden'
-               })
-        ], width=6, lg=4, xl=3, className="mb-3")
+                        html.Div([
+                            html.Div([
+                                html.Span('●', style={'color': '#6c757d', 'fontSize': '20px', 'marginRight': '8px'}),
+                                html.Span(tipo, className='small fw-bold', style={'fontSize': '0.8rem'}),
+                            ], style={'display': 'flex', 'alignItems': 'center', 'marginBottom': '4px'}),
+                            html.Div([
+                                html.Strong(str(cantidad), className='text-primary', style={'fontSize': '1.1rem'}),
+                                html.Small(f" evaluacion{'es' if cantidad != 1 else ''}", className='text-muted ms-1')
+                            ])
+                        ], className='mb-2 pb-2', style={'borderBottom': '1px solid #e9ecef'})
+                        for tipo, cantidad in sorted(meta['conteo_evaluadores'].items(), key=lambda x: x[1], reverse=True)
+                    ])
+                ])
+            ])
+        ], className="text-center")
 
-        graficas.append(tarjeta)
+        # --- TARJETAS DE KPIs ---
+        tarjetas_kpis = dbc.Row([
+            dbc.Col([
+                dbc.Card([
+                    dbc.CardBody([
+                        html.Div([
+                            html.I(className="fas fa-check-circle", style={'fontSize': '24px', 'color': '#667eea'}),
+                            html.H6("Nivel de Cumplimiento", className="text-muted mt-2 mb-1", style={'fontSize': '11px'}),
+                            html.H4(f"{kpis['nivel_cumplimiento']:.0f}%", className="fw-bold text-primary mb-0")
+                        ], className="text-center")
+                    ], className="p-2")
+                ], className="shadow-sm border-0", style={'borderTop': '3px solid #667eea'})
+            ], width=6, lg=3, className="mb-2"),
+            dbc.Col([
+                dbc.Card([
+                    dbc.CardBody([
+                        html.Div([
+                            html.I(className="fas fa-balance-scale", style={'fontSize': '24px', 'color': '#36d1dc'}),
+                            html.H6("Consistencia", className="text-muted mt-2 mb-1", style={'fontSize': '11px'}),
+                            html.H4(f"{kpis['consistencia']:.1f}/5.0", className="fw-bold text-info mb-0")
+                        ], className="text-center")
+                    ], className="p-2")
+                ], className="shadow-sm border-0", style={'borderTop': '3px solid #36d1dc'})
+            ], width=6, lg=3, className="mb-2"),
+            dbc.Col([
+                dbc.Card([
+                    dbc.CardBody([
+                        html.Div([
+                            html.I(className="fas fa-chart-line", style={'fontSize': '24px', 'color': '#f093fb'}),
+                            html.H6("Percentil", className="text-muted mt-2 mb-1", style={'fontSize': '11px'}),
+                            html.H4(f"Top {100 - kpis['percentil']:.0f}%", className="fw-bold text-success mb-0")
+                        ], className="text-center")
+                    ], className="p-2")
+                ], className="shadow-sm border-0", style={'borderTop': '3px solid #f093fb'})
+            ], width=6, lg=3, className="mb-2"),
+            dbc.Col([
+                dbc.Card([
+                    dbc.CardBody([
+                        html.Div([
+                            html.I(className="fas fa-arrow-up", style={'fontSize': '24px', 'color': '#ffd166'}),
+                            html.H6("Brecha de Mejora", className="text-muted mt-2 mb-1", style={'fontSize': '11px'}),
+                            html.H4(f"{kpis['brecha_mejora']:.2f}", className="fw-bold text-warning mb-0")
+                        ], className="text-center")
+                    ], className="p-2")
+                ], className="shadow-sm border-0", style={'borderTop': '3px solid #ffd166'})
+            ], width=6, lg=3, className="mb-2")
+        ], className="mb-3")
 
-    # Agregar las donas individuales al contenido
-    contenido.children.append(dbc.Row(graficas))
+        # Tarjeta Aptitud
+        tarjeta_aptitud = dbc.Card([
+            dbc.CardBody([
+                html.Div([
+                    html.H4(textos['estado_aptitud'], className="fw-bold mt-2 mb-1", style={'color': textos['color_aptitud']}),
+                    html.P(textos['mensaje_aptitud'], className="small text-muted mb-2"),
+                    html.Hr(className="my-2"),
+                    html.Div([
+                        html.Small("📋 Recomendación RH:", className="fw-bold d-block text-dark mb-1"),
+                        html.Small(textos['recomendacion_rh'], className="text-muted")
+                    ], className="text-start px-2")
+                ], className="text-center")
+            ])
+        ], className="shadow-sm border-0", style={'borderLeft': f"5px solid {textos['color_aptitud']}"})
 
-    return resumen, contenido
+        # Tarjeta Matriz
+        tarjeta_matriz = dbc.Card([
+            dbc.CardBody([
+                html.H5("Matriz de Potencial vs. Desempeño", className="card-title text-primary mb-1"),
+                dcc.Graph(figure=figs['matriz'], config={'displayModeBar': False}, style={'height': '450px'}),
+                html.Div([
+                    html.Div([
+                        html.H6(textos['cuadrante'], className="fw-bold mb-1", style={'color': textos['color_cuadrante']}),
+                        html.P(textos['descripcion_cuadrante'], className="small text-muted mb-2"),
+                        html.P(textos['accion_rh'], className="small fw-bold text-dark mb-0")
+                    ], className="p-3 rounded", style={'backgroundColor': '#f8f9fa'})
+                ])
+            ])
+        ], className="shadow-sm")
 
+        # Tabla Análisis
+        tabla_analisis = dbc.Card([
+            dbc.CardBody([
+                dbc.Row([
+                    dbc.Col([
+                        html.H6("🌟 Fortalezas", className="text-success fw-bold mb-3"),
+                        html.Ul([html.Li([html.Strong(cat), f": {val:.2f}/5.0"], className="mb-2") for cat, val in textos['fortalezas']], className="mb-0")
+                    ], width=6),
+                    dbc.Col([
+                        html.H6("📈 Áreas de Mejora", className="text-warning fw-bold mb-3"),
+                        html.Ul([html.Li([html.Strong(cat), f": {val:.2f}/5.0"], className="mb-2") for cat, val in textos['mejoras']], className="mb-0")
+                    ], width=6)
+                ])
+            ])
+        ], className="shadow-sm")
 
-# --- Ejecución de la App ---
+        # --- ORGANIZAR LAYOUT ---
+        contenido = html.Div([
+            tarjetas_kpis,
+            dbc.Row([
+                dbc.Col([
+                    dbc.Card([
+                        dbc.CardBody([
+                            html.H5("Análisis de Madurez por Habilidades", className="card-title text-primary mb-1"),
+                            dcc.Graph(figure=figs['radar_avanzado'], config={'displayModeBar': False}, style={'height': '500px'})
+                        ])
+                    ], className="shadow-sm")
+                ], width=12, lg=7, className="mb-3"),
+                dbc.Col([tarjeta_matriz], width=12, lg=5, className="mb-3")
+            ]),
+            dbc.Row([
+                dbc.Col([
+                    dbc.Card([
+                        dbc.CardBody([
+                            html.H5("Perfil de Competencias", className="card-title text-primary mb-3"),
+                            dcc.Graph(figure=figs['radar_general'], config={'displayModeBar': False}, style={'height': '400px'})
+                        ])
+                    ], className="shadow-sm")
+                ], width=12, lg=6, className="mb-3"),
+                dbc.Col([tarjeta_aptitud, html.Div(style={'height': '15px'}), tabla_analisis], width=12, lg=6, className="mb-3")
+            ]),
+            dbc.Row([
+                dbc.Col([
+                    dbc.Card([
+                        dbc.CardBody([
+                            dcc.Graph(figure=figs['comparacion'], config={'displayModeBar': False}, style={'height': '400px'})
+                        ])
+                    ], className="shadow-sm")
+                ], width=12, className="mb-4")
+            ])
+        ])
+
+        # Gráficas de Pastel (Donas)
+        graficas = []
+        colores_categorias = datos['data_raw']['colores_categorias']
+        
+        for categoria in categorias_comp.keys():
+            fig_key = f'cat_{categoria}'
+            if fig_key in figs:
+                fig_pastel = figs[fig_key]
+                
+                graficas.append(dbc.Col([
+                    dbc.Card([
+                        dbc.CardBody([
+                            html.Div([html.I(className="fas fa-star", style={'color': colores_categorias.get(categoria, '#667eea'), 'marginRight': '8px'}), html.Span(categoria, className="fw-bold")], className="text-center mb-2"),
+                            dcc.Graph(figure=fig_pastel, config={'displayModeBar': False}, style={'height': '180px'})
+                        ], className="p-2")
+                    ], className="shadow-sm border-0", style={'borderTop': f'4px solid {colores_categorias.get(categoria, "#667eea")}'})
+                ], width=6, lg=4, xl=3, className="mb-3"))
+
+        contenido.children.append(dbc.Row(graficas))
+        return resumen, contenido
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return html.Div(f"Error: {e}"), html.Div(f"Error detallado: {e}")
+
+# --- CALLBACK DE DESCARGA ---
+@app.callback(
+    Output("download-component", "data"),
+    Input("btn-pdf", "n_clicks"),
+    Input("btn-word", "n_clicks"),
+    State('evaluado-dropdown', 'value'),
+    State('w-auto', 'value'),
+    State('w-jefe', 'value'),
+    State('w-colegas', 'value'),
+    State('w-sub', 'value'),
+    prevent_initial_call=True
+)
+def descargar_reporte(n_pdf, n_word, evaluado, w_auto, w_jefe, w_colegas, w_sub):
+    ctx = dash.callback_context
+    if not ctx.triggered:
+        raise PreventUpdate
+    
+    button_id = ctx.triggered[0]['prop_id'].split('.')[0]
+    
+    datos = calcular_datos_dashboard(evaluado, w_auto, w_jefe, w_colegas, w_sub)
+    if datos is None or 'error' in datos:
+        raise PreventUpdate
+
+    print(f"Callback descarga activado: {button_id}")
+    
+    try:
+        if button_id == "btn-pdf":
+            print("Generando PDF...")
+            pdf_buffer = utils_reporte.generar_pdf(datos)
+            if pdf_buffer:
+                print("PDF generado correctamente, enviando...")
+                return dcc.send_bytes(pdf_buffer.read(), f"Reporte_360_{evaluado}.pdf")
+            else:
+                print("Error: generar_pdf retornó None")
+        
+        elif button_id == "btn-word":
+            print("Generando Word...")
+            word_buffer = utils_reporte.generar_word(datos)
+            if word_buffer:
+                print("Word generado correctamente, enviando...")
+                return dcc.send_bytes(word_buffer.read(), f"Reporte_360_{evaluado}.docx")
+            else:
+                print("Error: generar_word retornó None")
+    except Exception as e:
+        print(f"Excepción en generación de reporte: {e}")
+        import traceback
+        traceback.print_exc()
+            
+    return None
+
 if __name__ == '__main__':
     app.run(debug=True, port=8051)
